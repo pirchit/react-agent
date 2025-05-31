@@ -7,6 +7,7 @@ consider implementing more robust and specialized tools tailored to your needs.
 """
 
 from typing import Any, Callable, List, Optional, cast
+import requests  # Add this import at the top with the others
 
 from langchain_tavily import TavilySearch  # type: ignore[import-not-found]
 
@@ -25,4 +26,24 @@ async def search(query: str) -> Optional[dict[str, Any]]:
     return cast(dict[str, Any], await wrapped.ainvoke({"query": query}))
 
 
-TOOLS: List[Callable[..., Any]] = [search]
+async def gmail_mcp_action(action: str, payload: dict = None) -> dict:
+    """
+    Interact with the Gmail MCP server.
+
+    Args:
+        action (str): The action to perform (e.g., 'send', 'read', 'delete').
+        payload (dict, optional): The data to send with the request.
+
+    Returns:
+        dict: The response from the MCP server.
+    """
+    url = f"https://mcp.pipedream.net/f7222a51-6ea5-4c19-baea-66420bcc13b8/gmail/{action}"
+    try:
+        response = requests.post(url, json=payload or {})
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+TOOLS: List[Callable[..., Any]] = [search, gmail_mcp_action]
