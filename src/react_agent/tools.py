@@ -1,49 +1,76 @@
-"""This module provides example tools for web scraping and search functionality.
+"""tools.py ― reusable tools for LangGraph agents.
 
-It includes a basic Tavily search function (as an example)
+Includes
+--------
+• **search** – async web search powered by Tavily  
+• **gmail_mcp_action** – async POST helper for a Gmail MCP workflow (e.g. on Pipedream)
 
-These tools are intended as free examples to get started. For production use,
-consider implementing more robust and specialized tools tailored to your needs.
+Both functions are exported in the `TOOLS` list so LangGraph automatically
+registers them.
 """
 
-from typing import Any, Callable, List, Optional, cast
-import requests  # Add this import at the top with the others
+from __future__ import annotations
 
+import os
+from typing import Any, Callable, List, Optional, cast
+
+import httpx
 from langchain_tavily import TavilySearch  # type: ignore[import-not-found]
 
 from react_agent.configuration import Configuration
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Search tool
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 async def search(query: str) -> Optional[dict[str, Any]]:
-    """Search for general web results.
+    """Run a web search with Tavily and return the JSON response."""
+    cfg = Configuration.from_context()
+    tavily = TavilySearch(max_results=cfg.max_search_results)
+    return cast(dict[str, Any], await tavily.ainvoke({"query": query}))
 
-    This function performs a search using the Tavily search engine, which is designed
-    to provide comprehensive, accurate, and trusted results. It's particularly useful
-    for answering questions about current events.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gmail MCP tool
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Base URL of the Pipedream (or other) workflow that handles Gmail actions.
+# Keep the trailing slash OFF. Override in `.env` or your hosting config.
+_BASE_MCP_URL = os.getenv(
+    "GMAIL_MCP_URL",
+    "https://mcp.pipedream.net/f7222a51-6ea5-4c19-baea-66420bcc13b8",
+)
+
+
+async def gmail_mcp_action(action: str, payload: dict | None = None) -> dict[str, Any]:
+    """Call the Gmail MCP workflow.
+
+    Parameters
+    ----------
+    action : str
+        e.g. "read", "send", "delete" – your workflow decides what actions exist.
+    payload : dict | None
+        Any extra data the workflow needs (message_id, subject, body, etc.).
+
+    Returns
+    -------
+    dict
+        The JSON response from the workflow, or {"error": "..."} on failure.
     """
-    configuration = Configuration.from_context()
-    wrapped = TavilySearch(max_results=configuration.max_search_results)
-    return cast(dict[str, Any], await wrapped.ainvoke({"query": query}))
+    data = {"action": action, **(payload or {})}
 
-
-async def gmail_mcp_action(action: str, payload: dict = None) -> dict:
-    """
-    Interact with the Gmail MCP server.
-
-    Args:
-        action (str): The action to perform (e.g., 'send', 'read', 'delete').
-        payload (dict, optional): The data to send with the request.
-
-    Returns:
-        dict: The response from the MCP server.
-    """
-    url = f"https://mcp.pipedream.net/f7222a51-6ea5-4c19-baea-66420bcc13b8/gmail/{action}"
     try:
-        response = requests.post(url, json=payload or {})
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(_BASE_MCP_URL, json=data)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Exported tools for LangGraph
+# ─────────────────────────────────────────────────────────────────────────────
 
 TOOLS: List[Callable[..., Any]] = [search, gmail_mcp_action]
